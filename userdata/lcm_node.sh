@@ -60,3 +60,58 @@ cd install-datastax-ubuntu-$release/bin/lcm/
 --pubip $public_ip \
 --privip $private_ip \
 --nodeid $node_id
+#
+# configure limits
+#
+cd /etc/security
+cat limits.conf \
+| grep -v 'root.*memlock.*' \
+| grep -v 'root.*nofile.*' \
+| grep -v 'root.*nproc.*' \
+| grep -v 'root.*as.*' \
+| grep -v 'cassandra.*memlock.*' \
+| grep -v 'cassandra.*nofile.*' \
+| grep -v 'cassandra.*nproc.*' \
+| grep -v 'cassandra.*as.*' \
+> limits.conf.new
+cat <</EOF >> limits.conf.new
+root             -      memlock          unlimited
+root             -      nofile           100000
+root             -      nproc            32768
+root             -      as               unlimited
+cassandra        -      memlock          unlimited
+cassandra        -      nofile           100000
+cassandra        -      nproc            32768
+cassandra        -      as               unlimited
+/EOF
+(set -x; chown cassandra:cassandra limits.conf.new)
+(set -x; diff limits.conf limits.conf.new)
+(set -x; mv -f limits.conf.new limits.conf)
+# TCP settings
+cd /etc/sysctl.conf
+cat <</EOF >> cassandra.conf
+net.ipv4.tcp_keepalive_time=60
+net.ipv4.tcp_keepalive_probes=3
+net.ipv4.tcp_keepalive_intvl=10
+net.core.rmem_max=16777216
+net.core.wmem_max=16777216
+net.core.rmem_default=16777216
+net.core.wmem_default=16777216
+net.core.optmem_max=40960
+net.ipv4.tcp_rmem=4096 87380 16777216
+net.ipv4.tcp_wmem=4096 65536 16777216
+vm.max_map_count = 1048575
+/EOF
+sysctl -p /etc/sysctl.d/cassandra.conf
+
+# Disable CPU frequency scaling
+for CPUFREQ in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+do
+    [ -f $CPUFREQ ] || continue
+    echo -n performance > $CPUFREQ
+done
+
+echo 0 > /proc/sys/vm/zone_reclaim_mode
+
+echo never | tee /sys/kernel/mm/transparent_hugepage/defrag
+
